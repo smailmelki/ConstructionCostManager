@@ -38,7 +38,7 @@ else
 
     @if (!string.IsNullOrEmpty(_message))
     {
-        <div class="alert alert-success py-2">@_message</div>
+        <div class="alert @(_message.StartsWith("تعذر") ? "alert-danger" : "alert-success") py-2">@_message</div>
     }
 
     @if (_payingObligation is not null)
@@ -196,10 +196,17 @@ else
     private async Task SavePaymentAsync()
     {
         if (_newPayment.Amount <= 0) return;
-        await CostService.RecordPaymentAsync(_newPayment);
-        _payingObligation = null;
-        _message = "تم تسجيل الدفعة بنجاح وتحديث الالتزامات المالية.";
-        await LoadAsync();
+        try
+        {
+            await CostService.RecordPaymentAsync(_newPayment);
+            _payingObligation = null;
+            _message = "تم تسجيل الدفعة بنجاح وتحديث الالتزامات المالية.";
+            await LoadAsync();
+        }
+        catch (Exception ex)
+        {
+            _message = $"تعذر تسجيل الدفعة: {ex.Message}";
+        }
     }
 
     private async Task DeletePaymentAsync(int id)
