@@ -1,0 +1,88 @@
+@inherits LayoutComponentBase
+@inject IConstructionCostService CostService
+@inject ActiveProjectState ProjectState
+@implements IDisposable
+
+<div class="app-shell @(ProjectState.IsDarkMode ? "theme-dark" : "")">
+    <aside class="app-sidebar no-print">
+        <div class="px-2 pb-3 mb-2 border-bottom border-secondary border-opacity-25">
+            <div class="fw-bold fs-5 text-white">🏗️ مدير تكاليف البناء</div>
+            <div class="small text-white-50">نظام المتابعة المالية للمشاريع</div>
+        </div>
+        <NavMenu />
+    </aside>
+
+    <div class="app-main">
+        <header class="app-topbar no-print">
+            <div class="d-flex align-items-center gap-2 flex-wrap">
+                <span class="fw-semibold small text-secondary">المشروع النشط:</span>
+                @if (_projects.Count > 0)
+                {
+                    <select class="form-select form-select-sm" style="min-width: 220px; width: auto;"
+                            value="@(ProjectState.ActiveProjectId ?? 0)"
+                            @onchange="OnProjectChanged">
+                        @foreach (var p in _projects)
+                        {
+                            <option value="@p.Id">@p.Name (@ArabicDisplayHelper.GetStatusLabel(p.Status))</option>
+                        }
+                    </select>
+                }
+                else
+                {
+                    <a href="/projects" class="btn btn-sm btn-primary">+ إنشاء مشروع جديد</a>
+                }
+            </div>
+
+            <div class="d-flex align-items-center gap-2">
+                @if (ProjectState.ActiveProject is not null)
+                {
+                    <span class="badge bg-primary bg-opacity-10 text-primary border border-primary border-opacity-25 px-2 py-1">
+                        العملة: @ProjectState.ActiveProject.CurrencyCode
+                    </span>
+                }
+                <button class="btn btn-sm btn-outline-secondary" @onclick="ProjectState.ToggleTheme">
+                    @(ProjectState.IsDarkMode ? "☀️ الوضع الفاتح" : "🌙 الوضع الداكن")
+                </button>
+            </div>
+        </header>
+
+        <main class="app-content">
+            @Body
+        </main>
+    </div>
+</div>
+
+@code {
+    private List<Project> _projects = new();
+
+    protected override async Task OnInitializedAsync()
+    {
+        ProjectState.OnChange += HandleStateChanged;
+        await LoadProjectsAsync();
+    }
+
+    private async Task LoadProjectsAsync()
+    {
+        _projects = await CostService.GetProjectsAsync();
+        await ProjectState.InitializeAsync(CostService);
+    }
+
+    private async Task OnProjectChanged(ChangeEventArgs e)
+    {
+        if (int.TryParse(e.Value?.ToString(), out var projectId) && projectId > 0)
+        {
+            await ProjectState.SetActiveProjectAsync(CostService, projectId);
+        }
+    }
+
+    private async void HandleStateChanged()
+    {
+        _projects = await CostService.GetProjectsAsync();
+        await InvokeAsync(StateHasChanged);
+    }
+
+    public void Dispose()
+    {
+        ProjectState.OnChange -= HandleStateChanged;
+    }
+}

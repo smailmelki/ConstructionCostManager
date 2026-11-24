@@ -1,0 +1,282 @@
+@page "/workers"
+@inject IConstructionCostService CostService
+@inject ActiveProjectState ProjectState
+@implements IDisposable
+
+<PageTitle>العمال والأجور - مدير تكاليف البناء</PageTitle>
+
+@if (ProjectState.ActiveProject is null)
+{
+    <div class="fin-card text-center py-4">يرجى إنشاء أو اختيار مشروع أولاً من صفحة <a href="/projects">المشاريع</a>.</div>
+}
+else
+{
+    var cur = ProjectState.ActiveProject.CurrencyCode;
+
+    <div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
+        <h4 class="fw-bold mb-0">إدارة العمال والحرفيين والأجور</h4>
+        <div class="d-flex gap-2">
+            <button class="btn btn-outline-primary" @onclick="() => _showWorkerForm = !_showWorkerForm">+ إضافة عامل جديد</button>
+            <button class="btn btn-primary" @onclick="OpenWorkEntryForm">+ تسجيل عمل / أجرة</button>
+        </div>
+    </div>
+
+    @if (!string.IsNullOrEmpty(_statusMessage))
+    {
+        <div class="alert alert-info py-2">@_statusMessage</div>
+    }
+
+    @if (_showWorkerForm)
+    {
+        <div class="fin-card mb-4">
+            <h6 class="fw-bold mb-3">إضافة عامل أو حرفي</h6>
+            <div class="row g-3">
+                <div class="col-md-4">
+                    <label class="form-label small fw-semibold">اسم العامل *</label>
+                    <input class="form-control" @bind="_newWorker.Name" />
+                </div>
+                <div class="col-md-3">
+                    <label class="form-label small fw-semibold">التخصص</label>
+                    <select class="form-select" @bind="_newWorker.Specialty">
+                        @foreach (var s in Enum.GetValues<WorkerSpecialty>())
+                        {
+                            <option value="@s">@ArabicDisplayHelper.GetSpecialtyLabel(s)</option>
+                        }
+                    </select>
+                </div>
+                <div class="col-md-3">
+                    <label class="form-label small fw-semibold">رقم الهاتف</label>
+                    <input class="form-control" @bind="_newWorker.Phone" />
+                </div>
+                <div class="col-md-2 d-flex align-items-end">
+                    <button class="btn btn-primary w-100" @onclick="SaveWorkerAsync">حفظ العامل</button>
+                </div>
+            </div>
+        </div>
+    }
+
+    @if (_showWorkForm)
+    {
+        <div class="fin-card mb-4">
+            <h6 class="fw-bold mb-3">تسجيل عمل وأجرة عامل</h6>
+            <div class="row g-3">
+                <div class="col-md-3">
+                    <label class="form-label small fw-semibold">العامل *</label>
+                    <select class="form-select" @bind="_newEntry.WorkerId">
+                        @foreach (var w in _workers)
+                        {
+                            <option value="@w.Id">@w.Name (@ArabicDisplayHelper.GetSpecialtyLabel(w.Specialty))</option>
+                        }
+                    </select>
+                </div>
+                <div class="col-md-3">
+                    <label class="form-label small fw-semibold">المرحلة *</label>
+                    <select class="form-select" @bind="_newEntry.PhaseId">
+                        @foreach (var ph in _phases)
+                        {
+                            <option value="@ph.Id">@ph.DisplayOrder. @ph.Name</option>
+                        }
+                    </select>
+                </div>
+                <div class="col-md-3">
+                    <label class="form-label small fw-semibold">نوع العمل *</label>
+                    <input class="form-control" @bind="_newEntry.WorkType" placeholder="مثال: بناء جدار، تمديد كهرباء" />
+                </div>
+                <div class="col-md-3">
+                    <label class="form-label small fw-semibold">تاريخ العمل</label>
+                    <input type="date" class="form-control" @bind="_newEntry.WorkDate" />
+                </div>
+                <div class="col-md-3">
+                    <label class="form-label small fw-semibold">طريقة الحساب</label>
+                    <select class="form-select" @bind="_newEntry.CalculationMethod">
+                        @foreach (var m in Enum.GetValues<LaborCalculationMethod>())
+                        {
+                            <option value="@m">@ArabicDisplayHelper.GetCalculationMethodLabel(m)</option>
+                        }
+                    </select>
+                </div>
+                <div class="col-md-2">
+                    <label class="form-label small fw-semibold">عدد الأيام/الساعات/الوحدات</label>
+                    <input type="number" step="0.01" class="form-control" @bind="_newEntry.UnitsCompleted" />
+                </div>
+                <div class="col-md-2">
+                    <label class="form-label small fw-semibold">السعر للوحدة</label>
+                    <input type="number" step="0.01" class="form-control" @bind="_newEntry.UnitRate" />
+                </div>
+                <div class="col-md-2">
+                    <label class="form-label small fw-semibold">المبلغ المدفوع الآن</label>
+                    <input type="number" step="0.01" class="form-control" @bind="_initialPaid" />
+                </div>
+                <div class="col-md-3">
+                    <label class="form-label small fw-semibold">طريقة الدفع</label>
+                    <select class="form-select" @bind="_paymentMethod">
+                        @foreach (var pm in Enum.GetValues<PaymentMethod>())
+                        {
+                            <option value="@pm">@ArabicDisplayHelper.GetPaymentMethodLabel(pm)</option>
+                        }
+                    </select>
+                </div>
+                <div class="col-md-9">
+                    <label class="form-label small fw-semibold">ملاحظات</label>
+                    <input class="form-control" @bind="_newEntry.Notes" />
+                </div>
+                <div class="col-md-3 text-end">
+                    <div class="small text-secondary">المبلغ المستحق تلقائياً:</div>
+                    <div class="fs-5 fw-bold text-primary money-num">@ArabicDisplayHelper.FormatMoney(_newEntry.TotalAmount, cur)</div>
+                </div>
+            </div>
+            <div class="mt-3 d-flex gap-2">
+                <button class="btn btn-primary" @onclick="SaveWorkEntryAsync">حفظ الأجرة</button>
+                <button class="btn btn-outline-secondary" @onclick="() => _showWorkForm = false">إلغاء</button>
+            </div>
+        </div>
+    }
+
+    <div class="fin-card">
+        <div class="table-responsive">
+            <table class="table table-hover align-middle mb-0">
+                <thead>
+                    <tr>
+                        <th>التاريخ</th>
+                        <th>العامل</th>
+                        <th>المرحلة</th>
+                        <th>نوع العمل</th>
+                        <th>الحساب</th>
+                        <th>المستحق</th>
+                        <th>المدفوع</th>
+                        <th>المتبقي</th>
+                        <th>إجراء</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @if (_entries.Count == 0)
+                    {
+                        <tr><td colspan="9" class="text-center text-secondary py-4">لا توجد سجلات أجور عمال بعد.</td></tr>
+                    }
+                    else
+                    {
+                        @foreach (var e in _entries)
+                        {
+                            var paid = _paidByEntry.GetValueOrDefault(e.Id);
+                            var rem = Math.Max(0m, e.TotalAmount - paid);
+                            <tr>
+                                <td>@e.WorkDate.ToString("yyyy-MM-dd")</td>
+                                <td>
+                                    <div class="fw-semibold">@(e.Worker?.Name ?? "-")</div>
+                                    <div class="small text-secondary">@(e.Worker is not null ? ArabicDisplayHelper.GetSpecialtyLabel(e.Worker.Specialty) : "")</div>
+                                </td>
+                                <td>@(e.Phase?.Name ?? "-")</td>
+                                <td>@e.WorkType</td>
+                                <td class="small">@e.UnitsCompleted.ToString("N2") × @e.UnitRate.ToString("N2") (@ArabicDisplayHelper.GetCalculationMethodLabel(e.CalculationMethod))</td>
+                                <td class="money-num fw-bold">@ArabicDisplayHelper.FormatMoney(e.TotalAmount, cur)</td>
+                                <td class="money-num text-success">@ArabicDisplayHelper.FormatMoney(paid, cur)</td>
+                                <td class="money-num text-danger">@ArabicDisplayHelper.FormatMoney(rem, cur)</td>
+                                <td>
+                                    @if (rem > 0)
+                                    {
+                                        <a href="/payments" class="btn btn-sm btn-outline-success me-1">دفع</a>
+                                    }
+                                    <button class="btn btn-sm btn-outline-danger" @onclick="() => DeleteEntryAsync(e.Id)">حذف</button>
+                                </td>
+                            </tr>
+                        }
+                    }
+                </tbody>
+            </table>
+        </div>
+    </div>
+}
+
+@code {
+    private List<Worker> _workers = new();
+    private List<ConstructionPhase> _phases = new();
+    private List<WorkerWorkEntry> _entries = new();
+    private Dictionary<int, decimal> _paidByEntry = new();
+
+    private Worker _newWorker = new();
+    private WorkerWorkEntry _newEntry = new();
+    private decimal _initialPaid;
+    private PaymentMethod _paymentMethod = PaymentMethod.Cash;
+    private bool _showWorkerForm;
+    private bool _showWorkForm;
+    private string? _statusMessage;
+
+    protected override async Task OnInitializedAsync()
+    {
+        ProjectState.OnChange += HandleProjectChanged;
+        await LoadAsync();
+    }
+
+    private async Task LoadAsync()
+    {
+        if (!ProjectState.ActiveProjectId.HasValue) return;
+        var pid = ProjectState.ActiveProjectId.Value;
+        _workers = await CostService.GetWorkersAsync(pid);
+        _phases = await CostService.GetPhasesAsync(pid);
+        _entries = await CostService.GetWorkEntriesAsync(pid);
+        var payments = await CostService.GetPaymentsAsync(pid);
+        _paidByEntry = payments
+            .Where(p => p.ObligationType == ObligationType.WorkerWork)
+            .GroupBy(p => p.ReferenceId)
+            .ToDictionary(g => g.Key, g => g.Sum(x => x.Amount));
+    }
+
+    private async Task SaveWorkerAsync()
+    {
+        if (string.IsNullOrWhiteSpace(_newWorker.Name) || !ProjectState.ActiveProjectId.HasValue) return;
+        _newWorker.ProjectId = ProjectState.ActiveProjectId.Value;
+        await CostService.AddWorkerAsync(_newWorker);
+        _newWorker = new Worker();
+        _showWorkerForm = false;
+        _statusMessage = "تمت إضافة العامل بنجاح.";
+        await LoadAsync();
+    }
+
+    private void OpenWorkEntryForm()
+    {
+        if (_workers.Count == 0)
+        {
+            _showWorkerForm = true;
+            _statusMessage = "يرجى إضافة عامل واحد على الأقل أولاً.";
+            return;
+        }
+        _newEntry = new WorkerWorkEntry
+        {
+            ProjectId = ProjectState.ActiveProjectId ?? 0,
+            WorkerId = _workers[0].Id,
+            PhaseId = _phases.FirstOrDefault()?.Id ?? 0,
+            UnitsCompleted = 1,
+            WorkDate = DateTime.Today
+        };
+        _initialPaid = 0m;
+        _showWorkForm = !_showWorkForm;
+    }
+
+    private async Task SaveWorkEntryAsync()
+    {
+        if (_newEntry.WorkerId == 0 || _newEntry.PhaseId == 0 || string.IsNullOrWhiteSpace(_newEntry.WorkType))
+        {
+            _statusMessage = "يرجى ملء الحقول المطلوبة.";
+            return;
+        }
+        await CostService.AddWorkEntryAsync(_newEntry, _initialPaid, _paymentMethod);
+        _showWorkForm = false;
+        _statusMessage = "تم تسجيل أجرة العامل بنجاح.";
+        await LoadAsync();
+    }
+
+    private async Task DeleteEntryAsync(int id)
+    {
+        await CostService.SoftDeleteWorkEntryAsync(id);
+        _statusMessage = "تم حذف السجل.";
+        await LoadAsync();
+    }
+
+    private async void HandleProjectChanged()
+    {
+        await LoadAsync();
+        await InvokeAsync(StateHasChanged);
+    }
+
+    public void Dispose() => ProjectState.OnChange -= HandleProjectChanged;
+}

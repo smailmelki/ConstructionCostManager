@@ -1,0 +1,82 @@
+@page "/settings"
+@inject IConstructionCostService CostService
+@inject DatabaseBackupService BackupService
+
+<PageTitle>الإعدادات والنسخ الاحتياطي - مدير تكاليف البناء</PageTitle>
+
+<h4 class="fw-bold mb-3">الإعدادات والنسخ الاحتياطي واستعادة البيانات</h4>
+
+@if (!string.IsNullOrEmpty(_message))
+{
+    <div class="alert @(_isError ? "alert-danger" : "alert-success") py-2">@_message</div>
+}
+
+<div class="row g-3">
+    <div class="col-md-6">
+        <div class="fin-card h-100">
+            <h6 class="fw-bold mb-3">إعدادات العملة الافتراضية</h6>
+            <div class="mb-3">
+                <label class="form-label small fw-semibold">العملة الافتراضية للمشاريع الجديدة</label>
+                <select class="form-select" @bind="_defaultCurrency">
+                    <option value="DZD">الدينار الجزائري (DZD)</option>
+                    <option value="SAR">الريال السعودي (SAR)</option>
+                    <option value="MAD">الدرهم المغربي (MAD)</option>
+                    <option value="TND">الدينار التونسي (TND)</option>
+                    <option value="AED">الدرهم الإماراتي (AED)</option>
+                    <option value="EGP">الجنيه المصري (EGP)</option>
+                    <option value="USD">الدولار الأمريكي (USD)</option>
+                    <option value="EUR">اليورو (EUR)</option>
+                </select>
+            </div>
+            <button class="btn btn-primary" @onclick="SaveCurrencyAsync">حفظ الإعدادات</button>
+        </div>
+    </div>
+
+    <div class="col-md-6">
+        <div class="fin-card h-100">
+            <h6 class="fw-bold mb-3">النسخ الاحتياطي واستعادة قاعدة البيانات (SQLite)</h6>
+            <p class="small text-secondary">احتفظ بنسخة احتياطية دورية من جميع المشاريع والفواتير والدفعات لضمان عدم ضياع البيانات.</p>
+            <div class="mb-3">
+                <a href="/api/backup/download" class="btn btn-success" target="_blank">⬇️ تحميل نسخة احتياطية (.db)</a>
+            </div>
+            <div class="border-top pt-3">
+                <label class="form-label small fw-semibold">استعادة من ملف نسخة احتياطية (.db)</label>
+                <InputFile OnChange="HandleRestoreFileAsync" class="form-control" accept=".db" />
+            </div>
+        </div>
+    </div>
+</div>
+
+@code {
+    private string _defaultCurrency = "DZD";
+    private string? _message;
+    private bool _isError;
+
+    protected override async Task OnInitializedAsync()
+    {
+        _defaultCurrency = await CostService.GetSettingAsync("DefaultCurrency", "DZD");
+    }
+
+    private async Task SaveCurrencyAsync()
+    {
+        await CostService.SetSettingAsync("DefaultCurrency", _defaultCurrency);
+        _isError = false;
+        _message = "تم حفظ العملة الافتراضية بنجاح.";
+    }
+
+    private async Task HandleRestoreFileAsync(InputFileChangeEventArgs e)
+    {
+        try
+        {
+            await using var stream = e.File.OpenReadStream(maxAllowedSize: 50 * 1024 * 1024);
+            await BackupService.RestoreBackupAsync(stream);
+            _isError = false;
+            _message = "تمت استعادة قاعدة البيانات بنجاح. يرجى تحديث الصفحة.";
+        }
+        catch (Exception ex)
+        {
+            _isError = true;
+            _message = $"فشلت الاستعادة: {ex.Message}";
+        }
+    }
+}

@@ -1,0 +1,144 @@
+@page "/reports"
+@inject IConstructionCostService CostService
+@inject ActiveProjectState ProjectState
+@inject IJSRuntime JS
+@implements IDisposable
+
+<PageTitle>التقارير والطباعة - مدير تكاليف البناء</PageTitle>
+
+@if (ProjectState.ActiveProject is null || _summary is null)
+{
+    <div class="fin-card text-center py-4">يرجى إنشاء أو اختيار مشروع أولاً من صفحة <a href="/projects">المشاريع</a>.</div>
+}
+else
+{
+    var cur = _summary.CurrencyCode;
+    var pid = ProjectState.ActiveProject.Id;
+    var fromStr = _fromDate?.ToString("yyyy-MM-dd") ?? "";
+    var toStr = _toDate?.ToString("yyyy-MM-dd") ?? "";
+
+    <div class="no-print">
+        <h4 class="fw-bold mb-3">التقارير المالية والتصدير (PDF / Excel / طباعة A4)</h4>
+
+        <div class="fin-card mb-4">
+            <div class="row g-3 align-items-end">
+                <div class="col-md-4">
+                    <label class="form-label small fw-semibold">نوع التقرير</label>
+                    <select class="form-select" @bind="_reportType">
+                        <option value="@FinancialReportType.FullProjectCost">تقرير تكاليف المشروع بالكامل</option>
+                        <option value="@FinancialReportType.Materials">تقرير مواد البناء</option>
+                        <option value="@FinancialReportType.Workers">تقرير أجور العمال</option>
+                        <option value="@FinancialReportType.Phases">تقرير تكاليف كل مرحلة</option>
+                        <option value="@FinancialReportType.DateRangeExpenses">تقرير المصاريف حسب الفترة الزمنية</option>
+                        <option value="@FinancialReportType.DebtsAndRemaining">تقرير الديون والمبالغ المتبقية</option>
+                        <option value="@FinancialReportType.BudgetVsActual">تقرير مقارنة الميزانية بالتكلفة الفعلية</option>
+                    </select>
+                </div>
+                <div class="col-md-2">
+                    <label class="form-label small fw-semibold">من تاريخ</label>
+                    <input type="date" class="form-control" @bind="_fromDate" />
+                </div>
+                <div class="col-md-2">
+                    <label class="form-label small fw-semibold">إلى تاريخ</label>
+                    <input type="date" class="form-control" @bind="_toDate" />
+                </div>
+                <div class="col-md-4 d-flex gap-2 flex-wrap">
+                    <a class="btn btn-danger" href="/api/reports/pdf?projectId=@pid&type=@_reportType&from=@fromStr&to=@toStr" target="_blank">
+                        📄 تصدير PDF
+                    </a>
+                    <a class="btn btn-success" href="/api/reports/excel?projectId=@pid&type=@_reportType&from=@fromStr&to=@toStr" target="_blank">
+                        📊 تصدير Excel
+                    </a>
+                    <button class="btn btn-outline-primary" @onclick="PrintA4Async">
+                        🖨️ طباعة A4
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- A4 Print Preview Area -->
+    <div class="fin-card">
+        <div class="d-flex justify-content-between border-bottom pb-3 mb-3">
+            <div>
+                <h5 class="fw-bold mb-1">المشروع: @ProjectState.ActiveProject.Name</h5>
+                <div class="small text-secondary">المالك: @ProjectState.ActiveProject.OwnerName | الموقع: @ProjectState.ActiveProject.Location</div>
+            </div>
+            <div class="text-end small">
+                <div>تاريخ التقرير: @DateTime.Now.ToString("yyyy-MM-dd")</div>
+                <div>العملة: @cur</div>
+            </div>
+        </div>
+
+        <h6 class="fw-bold mb-2">ملخص التكاليف الإجمالية</h6>
+        <div class="row g-2 mb-4">
+            <div class="col-6 col-md-3"><strong>الميزانية:</strong> @ArabicDisplayHelper.FormatMoney(_summary.EstimatedBudget, cur)</div>
+            <div class="col-6 col-md-3"><strong>المستحق الكلي:</strong> @ArabicDisplayHelper.FormatMoney(_summary.TotalAccruedCost, cur)</div>
+            <div class="col-6 col-md-3"><strong>المدفوع:</strong> @ArabicDisplayHelper.FormatMoney(_summary.TotalPaid, cur)</div>
+            <div class="col-6 col-md-3"><strong>المتبقي (الديون):</strong> @ArabicDisplayHelper.FormatMoney(_summary.TotalRemainingDebt, cur)</div>
+        </div>
+
+        <h6 class="fw-bold mb-2">تفاصيل التكاليف حسب المراحل</h6>
+        <div class="table-responsive">
+            <table class="table table-bordered table-sm mb-0">
+                <thead>
+                    <tr>
+                        <th>المرحلة</th>
+                        <th>المواد</th>
+                        <th>العمال</th>
+                        <th>النقل والمعدات</th>
+                        <th>الإجمالي</th>
+                        <th>المدفوع</th>
+                        <th>المتبقي</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var ph in _summary.PhaseSummaries)
+                    {
+                        <tr>
+                            <td>@ph.DisplayOrder. @ph.PhaseName</td>
+                            <td class="money-num">@ArabicDisplayHelper.FormatMoney(ph.MaterialsCost, cur)</td>
+                            <td class="money-num">@ArabicDisplayHelper.FormatMoney(ph.LaborCost, cur)</td>
+                            <td class="money-num">@ArabicDisplayHelper.FormatMoney(ph.TransportAndOtherCost, cur)</td>
+                            <td class="money-num fw-bold">@ArabicDisplayHelper.FormatMoney(ph.TotalCost, cur)</td>
+                            <td class="money-num">@ArabicDisplayHelper.FormatMoney(ph.PaidAmount, cur)</td>
+                            <td class="money-num">@ArabicDisplayHelper.FormatMoney(ph.RemainingDebt, cur)</td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+    </div>
+}
+
+@code {
+    private ProjectFinancialSummary? _summary;
+    private FinancialReportType _reportType = FinancialReportType.FullProjectCost;
+    private DateTime? _fromDate;
+    private DateTime? _toDate;
+
+    protected override async Task OnInitializedAsync()
+    {
+        ProjectState.OnChange += HandleProjectChanged;
+        await LoadAsync();
+    }
+
+    private async Task LoadAsync()
+    {
+        if (!ProjectState.ActiveProjectId.HasValue) return;
+        _summary = await CostService.GetProjectFinancialSummaryAsync(ProjectState.ActiveProjectId.Value);
+    }
+
+    private async Task PrintA4Async()
+    {
+        await JS.InvokeVoidAsync("window.print");
+    }
+
+    private async void HandleProjectChanged()
+    {
+        await LoadAsync();
+        await InvokeAsync(StateHasChanged);
+    }
+
+    public void Dispose() => ProjectState.OnChange -= HandleProjectChanged;
+}

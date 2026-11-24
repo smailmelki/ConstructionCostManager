@@ -1,0 +1,172 @@
+@page "/expenses"
+@inject IConstructionCostService CostService
+@inject ActiveProjectState ProjectState
+@implements IDisposable
+
+<PageTitle>النقل والمعدات والمصاريف - مدير تكاليف البناء</PageTitle>
+
+@if (ProjectState.ActiveProject is null)
+{
+    <div class="fin-card text-center py-4">يرجى إنشاء أو اختيار مشروع أولاً من صفحة <a href="/projects">المشاريع</a>.</div>
+}
+else
+{
+    var cur = ProjectState.ActiveProject.CurrencyCode;
+
+    <div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
+        <h4 class="fw-bold mb-0">تكاليف النقل وكراء المعدات والمصاريف الإضافية</h4>
+        <button class="btn btn-primary" @onclick="OpenForm">+ إضافة مصروف جديد</button>
+    </div>
+
+    @if (_showForm)
+    {
+        <div class="fin-card mb-4">
+            <h6 class="fw-bold mb-3">تسجيل مصروف</h6>
+            <div class="row g-3">
+                <div class="col-md-3">
+                    <label class="form-label small fw-semibold">التصنيف *</label>
+                    <select class="form-select" @bind="_newExpense.Category">
+                        @foreach (var c in Enum.GetValues<ExpenseCategory>())
+                        {
+                            <option value="@c">@ArabicDisplayHelper.GetExpenseCategoryLabel(c)</option>
+                        }
+                    </select>
+                </div>
+                <div class="col-md-3">
+                    <label class="form-label small fw-semibold">المرحلة *</label>
+                    <select class="form-select" @bind="_newExpense.PhaseId">
+                        @foreach (var ph in _phases)
+                        {
+                            <option value="@ph.Id">@ph.DisplayOrder. @ph.Name</option>
+                        }
+                    </select>
+                </div>
+                <div class="col-md-3">
+                    <label class="form-label small fw-semibold">البيان / الوصف *</label>
+                    <input class="form-control" @bind="_newExpense.Title" placeholder="مثال: كراء خلاطة إسمنت" />
+                </div>
+                <div class="col-md-3">
+                    <label class="form-label small fw-semibold">الجهة / المؤجر</label>
+                    <input class="form-control" @bind="_newExpense.VendorOrParty" />
+                </div>
+                <div class="col-md-3">
+                    <label class="form-label small fw-semibold">المبلغ الإجمالي *</label>
+                    <input type="number" step="0.01" class="form-control" @bind="_newExpense.Amount" />
+                </div>
+                <div class="col-md-3">
+                    <label class="form-label small fw-semibold">المبلغ المدفوع الآن</label>
+                    <input type="number" step="0.01" class="form-control" @bind="_initialPaid" />
+                </div>
+                <div class="col-md-3">
+                    <label class="form-label small fw-semibold">التاريخ</label>
+                    <input type="date" class="form-control" @bind="_newExpense.ExpenseDate" />
+                </div>
+                <div class="col-md-3">
+                    <label class="form-label small fw-semibold">ملاحظات</label>
+                    <input class="form-control" @bind="_newExpense.Notes" />
+                </div>
+            </div>
+            <div class="mt-3 d-flex gap-2">
+                <button class="btn btn-primary" @onclick="SaveAsync">حفظ المصروف</button>
+                <button class="btn btn-outline-secondary" @onclick="() => _showForm = false">إلغاء</button>
+            </div>
+        </div>
+    }
+
+    <div class="fin-card">
+        <div class="table-responsive">
+            <table class="table table-hover align-middle mb-0">
+                <thead>
+                    <tr>
+                        <th>التاريخ</th>
+                        <th>التصنيف</th>
+                        <th>البيان</th>
+                        <th>المرحلة</th>
+                        <th>الجهة</th>
+                        <th>المبلغ</th>
+                        <th>إجراء</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @if (_expenses.Count == 0)
+                    {
+                        <tr><td colspan="7" class="text-center text-secondary py-4">لا توجد مصاريف نقل أو معدات مسجلة بعد.</td></tr>
+                    }
+                    else
+                    {
+                        @foreach (var e in _expenses)
+                        {
+                            <tr>
+                                <td>@e.ExpenseDate.ToString("yyyy-MM-dd")</td>
+                                <td><span class="badge bg-secondary bg-opacity-10 text-secondary">@ArabicDisplayHelper.GetExpenseCategoryLabel(e.Category)</span></td>
+                                <td class="fw-semibold">@e.Title</td>
+                                <td>@(e.Phase?.Name ?? "-")</td>
+                                <td>@e.VendorOrParty</td>
+                                <td class="money-num fw-bold">@ArabicDisplayHelper.FormatMoney(e.Amount, cur)</td>
+                                <td>
+                                    <button class="btn btn-sm btn-outline-danger" @onclick="() => DeleteAsync(e.Id)">حذف</button>
+                                </td>
+                            </tr>
+                        }
+                    }
+                </tbody>
+            </table>
+        </div>
+    </div>
+}
+
+@code {
+    private List<ConstructionPhase> _phases = new();
+    private List<OtherExpense> _expenses = new();
+    private OtherExpense _newExpense = new();
+    private decimal _initialPaid;
+    private bool _showForm;
+
+    protected override async Task OnInitializedAsync()
+    {
+        ProjectState.OnChange += HandleProjectChanged;
+        await LoadAsync();
+    }
+
+    private async Task LoadAsync()
+    {
+        if (!ProjectState.ActiveProjectId.HasValue) return;
+        var pid = ProjectState.ActiveProjectId.Value;
+        _phases = await CostService.GetPhasesAsync(pid);
+        _expenses = await CostService.GetOtherExpensesAsync(pid);
+    }
+
+    private void OpenForm()
+    {
+        _newExpense = new OtherExpense
+        {
+            ProjectId = ProjectState.ActiveProjectId ?? 0,
+            PhaseId = _phases.FirstOrDefault()?.Id ?? 0,
+            ExpenseDate = DateTime.Today
+        };
+        _initialPaid = 0m;
+        _showForm = !_showForm;
+    }
+
+    private async Task SaveAsync()
+    {
+        if (string.IsNullOrWhiteSpace(_newExpense.Title) || _newExpense.Amount <= 0) return;
+        await CostService.AddOtherExpenseAsync(_newExpense, _initialPaid);
+        _showForm = false;
+        await LoadAsync();
+    }
+
+    private async Task DeleteAsync(int id)
+    {
+        await CostService.SoftDeleteOtherExpenseAsync(id);
+        await LoadAsync();
+    }
+
+    private async void HandleProjectChanged()
+    {
+        await LoadAsync();
+        await InvokeAsync(StateHasChanged);
+    }
+
+    public void Dispose() => ProjectState.OnChange -= HandleProjectChanged;
+}

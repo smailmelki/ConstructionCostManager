@@ -1,0 +1,372 @@
+@page "/"
+@inject IConstructionCostService CostService
+@inject ActiveProjectState ProjectState
+@implements IDisposable
+
+<PageTitle>لوحة التحكم - مدير تكاليف البناء</PageTitle>
+
+@if (_loading)
+{
+    <div class="fin-card text-center py-5">جاري تحميل البيانات المالية...</div>
+}
+else if (ProjectState.ActiveProject is null || _summary is null)
+{
+    <div class="fin-card text-center py-5">
+        <h4 class="fw-bold mb-2">مرحباً بك في نظام إدارة تكاليف مشاريع البناء</h4>
+        <p class="text-secondary mb-4">ابدأ بإنشاء مشروعك الأول لتتبع المواد والعمال والمراحل والميزانية بدقة.</p>
+        <div class="d-flex justify-content-center gap-2 flex-wrap">
+            <a href="/projects" class="btn btn-primary px-4">+ إنشاء مشروع جديد</a>
+            <button class="btn btn-outline-secondary px-4" @onclick="CreateDemoProjectAsync">إنشاء مشروع تجريبي جاهز</button>
+        </div>
+    </div>
+}
+else
+{
+    var cur = _summary.CurrencyCode;
+
+    <div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
+        <div>
+            <h4 class="fw-bold mb-0">لوحة التحكم المالية: @_summary.ProjectName</h4>
+            <div class="small text-secondary">اضغط على أي بطاقة لعرض التفاصيل التفصيلية للمبلغ</div>
+        </div>
+        <div class="d-flex gap-2">
+            <a href="/materials" class="btn btn-sm btn-primary">+ شراء مواد</a>
+            <a href="/workers" class="btn btn-sm btn-outline-primary">+ أجرة عامل</a>
+            <a href="/payments" class="btn btn-sm btn-outline-success">+ تسجيل دفعة</a>
+        </div>
+    </div>
+
+    <!-- KPI Grid -->
+    <div class="row g-3 mb-4">
+        <div class="col-6 col-md-4 col-xl-3">
+            <div class="kpi-card" @onclick='() => OpenDrilldown("الميزانية والتكاليف الكلية", "budget")'>
+                <div class="kpi-label">الميزانية التقديرية</div>
+                <div class="kpi-value text-primary">@ArabicDisplayHelper.FormatMoney(_summary.EstimatedBudget, cur)</div>
+            </div>
+        </div>
+        <div class="col-6 col-md-4 col-xl-3">
+            <div class="kpi-card" @onclick='() => OpenDrilldown("تفاصيل إجمالي المصاريف المستحقة", "all")'>
+                <div class="kpi-label">إجمالي التكاليف (المستحقة)</div>
+                <div class="kpi-value">@ArabicDisplayHelper.FormatMoney(_summary.TotalAccruedCost, cur)</div>
+            </div>
+        </div>
+        <div class="col-6 col-md-4 col-xl-3">
+            <div class="kpi-card" @onclick='() => OpenDrilldown("تفاصيل المبالغ المدفوعة فعلياً", "paid")'>
+                <div class="kpi-label">إجمالي المبالغ المدفوعة</div>
+                <div class="kpi-value text-success">@ArabicDisplayHelper.FormatMoney(_summary.TotalPaid, cur)</div>
+            </div>
+        </div>
+        <div class="col-6 col-md-4 col-xl-3">
+            <div class="kpi-card" @onclick='() => OpenDrilldown("الديون والمبالغ المتبقية", "debt")'>
+                <div class="kpi-label">الديون والمبالغ المتبقية</div>
+                <div class="kpi-value text-danger">@ArabicDisplayHelper.FormatMoney(_summary.TotalRemainingDebt, cur)</div>
+            </div>
+        </div>
+        <div class="col-6 col-md-4 col-xl-3">
+            <div class="kpi-card" @onclick='() => OpenDrilldown("الميزانية المتبقية ونسبة الاستهلاك", "budget")'>
+                <div class="kpi-label">الميزانية المتبقية</div>
+                <div class="kpi-value @(_summary.IsOverBudget ? "text-danger" : "text-success")">
+                    @ArabicDisplayHelper.FormatMoney(_summary.RemainingBudget, cur)
+                </div>
+                <div class="small text-secondary mt-1">نسبة الاستهلاك: @_summary.BudgetConsumptionPercentage.ToString("N1")%</div>
+            </div>
+        </div>
+        <div class="col-6 col-md-4 col-xl-3">
+            <div class="kpi-card" @onclick='() => OpenDrilldown("تكاليف مواد البناء", "materials")'>
+                <div class="kpi-label">تكلفة المواد (مع النقل)</div>
+                <div class="kpi-value">@ArabicDisplayHelper.FormatMoney(_summary.TotalMaterialsWithTransport, cur)</div>
+            </div>
+        </div>
+        <div class="col-6 col-md-4 col-xl-3">
+            <div class="kpi-card" @onclick='() => OpenDrilldown("تكاليف أجور العمال", "workers")'>
+                <div class="kpi-label">تكلفة العمال</div>
+                <div class="kpi-value">@ArabicDisplayHelper.FormatMoney(_summary.TotalLaborCost, cur)</div>
+            </div>
+        </div>
+        <div class="col-6 col-md-4 col-xl-3">
+            <div class="kpi-card" @onclick='() => OpenDrilldown("النقل وكراء المعدات والمصاريف الإضافية", "other")'>
+                <div class="kpi-label">المعدات والنقل والمصاريف الأخرى</div>
+                <div class="kpi-value">@ArabicDisplayHelper.FormatMoney(_summary.TotalOtherTransportCost + _summary.TotalEquipmentRentalCost + _summary.TotalAdditionalExpensesCost, cur)</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Charts Row 1 -->
+    <div class="row g-3 mb-4">
+        <div class="col-12 col-lg-6">
+            <div class="fin-card h-100">
+                <h6 class="fw-bold mb-3">مقارنة الميزانية بالتكاليف الفعلية</h6>
+                @{
+                    var pct = Math.Min(100m, Math.Max(0m, _summary.BudgetConsumptionPercentage));
+                    var barColor = _summary.IsOverBudget ? "#dc2626" : (_summary.BudgetConsumptionPercentage > 85 ? "#d97706" : "#0f766e");
+                }
+                <div class="mb-2 d-flex justify-content-between small">
+                    <span>المستحق الفعلي: @ArabicDisplayHelper.FormatMoney(_summary.TotalAccruedCost, cur)</span>
+                    <span>الميزانية: @ArabicDisplayHelper.FormatMoney(_summary.EstimatedBudget, cur)</span>
+                </div>
+                <div class="progress mb-3" style="height: 22px; border-radius: 10px;">
+                    <div class="progress-bar" style="width: @pct.ToString("F1", System.Globalization.CultureInfo.InvariantCulture)%; background-color: @barColor;">
+                        @_summary.BudgetConsumptionPercentage.ToString("N1")%
+                    </div>
+                </div>
+
+                <h6 class="fw-bold mb-2 mt-4">توزيع المصاريف حسب التصنيف</h6>
+                @if (_summary.ExpenseCategoryBreakdowns.Count == 0)
+                {
+                    <div class="text-secondary small">لا توجد مصاريف مسجلة بعد.</div>
+                }
+                else
+                {
+                    var colors = new[] { "#2563eb", "#0d9488", "#d97706", "#7c3aed", "#dc2626" };
+                    int idx = 0;
+                    foreach (var cat in _summary.ExpenseCategoryBreakdowns)
+                    {
+                        var c = colors[idx++ % colors.Length];
+                        <div class="mb-2">
+                            <div class="d-flex justify-content-between small mb-1">
+                                <span>@cat.CategoryName</span>
+                                <span class="money-num">@ArabicDisplayHelper.FormatMoney(cat.Amount, cur) (@cat.Percentage.ToString("N1")%)</span>
+                            </div>
+                            <div class="progress" style="height: 10px;">
+                                <div class="progress-bar" style="width: @cat.Percentage.ToString("F1", System.Globalization.CultureInfo.InvariantCulture)%; background-color: @c;"></div>
+                            </div>
+                        </div>
+                    }
+                }
+            </div>
+        </div>
+
+        <div class="col-12 col-lg-6">
+            <div class="fin-card h-100">
+                <h6 class="fw-bold mb-3">تطور المصاريف حسب الأشهر</h6>
+                @if (_summary.MonthlyTrends.Count == 0)
+                {
+                    <div class="text-secondary small">لا توجد بيانات شهرية بعد.</div>
+                }
+                else
+                {
+                    var maxMonth = _summary.MonthlyTrends.Max(m => m.TotalCost);
+                    if (maxMonth <= 0) maxMonth = 1;
+                    <div class="d-flex flex-column gap-2">
+                        @foreach (var m in _summary.MonthlyTrends)
+                        {
+                            var wPct = Math.Round((m.TotalCost / maxMonth) * 100m, 1);
+                            <div>
+                                <div class="d-flex justify-content-between small mb-1">
+                                    <span class="fw-semibold">@m.Label</span>
+                                    <span class="money-num">المستحق: @ArabicDisplayHelper.FormatMoney(m.TotalCost, cur) | المدفوع: @ArabicDisplayHelper.FormatMoney(m.PaidCost, cur)</span>
+                                </div>
+                                <div class="progress" style="height: 12px;">
+                                    <div class="progress-bar bg-primary" style="width: @wPct.ToString("F1", System.Globalization.CultureInfo.InvariantCulture)%"></div>
+                                </div>
+                            </div>
+                        }
+                    </div>
+                }
+            </div>
+        </div>
+    </div>
+
+    <!-- Phase Costs Table -->
+    <div class="fin-card mb-4">
+        <div class="d-flex justify-content-between align-items-center mb-3">
+            <h6 class="fw-bold mb-0">توزيع التكاليف حسب مراحل البناء</h6>
+            <a href="/phases" class="btn btn-sm btn-outline-primary">إدارة المراحل</a>
+        </div>
+        <div class="table-responsive">
+            <table class="table table-hover align-middle mb-0">
+                <thead>
+                    <tr>
+                        <th>المرحلة</th>
+                        <th>المواد</th>
+                        <th>العمال</th>
+                        <th>النقل والمعدات</th>
+                        <th>الإجمالي</th>
+                        <th>المدفوع</th>
+                        <th>المتبقي</th>
+                        <th>النسبة</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var ph in _summary.PhaseSummaries)
+                    {
+                        <tr>
+                            <td class="fw-semibold">@ph.DisplayOrder. @ph.PhaseName</td>
+                            <td class="money-num">@ArabicDisplayHelper.FormatMoney(ph.MaterialsCost, cur)</td>
+                            <td class="money-num">@ArabicDisplayHelper.FormatMoney(ph.LaborCost, cur)</td>
+                            <td class="money-num">@ArabicDisplayHelper.FormatMoney(ph.TransportAndOtherCost, cur)</td>
+                            <td class="money-num fw-bold">@ArabicDisplayHelper.FormatMoney(ph.TotalCost, cur)</td>
+                            <td class="money-num text-success">@ArabicDisplayHelper.FormatMoney(ph.PaidAmount, cur)</td>
+                            <td class="money-num text-danger">@ArabicDisplayHelper.FormatMoney(ph.RemainingDebt, cur)</td>
+                            <td>@ph.PercentageOfTotal.ToString("N1")%</td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    @if (_drilldownTitle is not null)
+    {
+        <div class="modal fade show d-block" tabindex="-1" style="background: rgba(0,0,0,0.5);">
+            <div class="modal-dialog modal-lg modal-dialog-scrollable">
+                <div class="modal-content fin-card">
+                    <div class="modal-header border-bottom">
+                        <h5 class="modal-title fw-bold">@_drilldownTitle</h5>
+                        <button type="button" class="btn-close" @onclick="() => _drilldownTitle = null"></button>
+                    </div>
+                    <div class="modal-body">
+                        <div class="table-responsive">
+                            <table class="table table-sm">
+                                <thead>
+                                    <tr>
+                                        <th>التاريخ</th>
+                                        <th>البيان</th>
+                                        <th>الطرف / المورد</th>
+                                        <th>المرحلة</th>
+                                        <th>المستحق</th>
+                                        <th>المدفوع</th>
+                                        <th>المتبقي</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    @foreach (var ob in _drilldownItems)
+                                    {
+                                        <tr>
+                                            <td>@ob.Date.ToString("yyyy-MM-dd")</td>
+                                            <td>@ob.Title</td>
+                                            <td>@ob.PartyName</td>
+                                            <td>@ob.PhaseName</td>
+                                            <td class="money-num">@ArabicDisplayHelper.FormatMoney(ob.TotalAmount, cur)</td>
+                                            <td class="money-num text-success">@ArabicDisplayHelper.FormatMoney(ob.PaidAmount, cur)</td>
+                                            <td class="money-num text-danger">@ArabicDisplayHelper.FormatMoney(ob.RemainingAmount, cur)</td>
+                                        </tr>
+                                    }
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    }
+}
+
+@code {
+    private bool _loading = true;
+    private ProjectFinancialSummary? _summary;
+    private string? _drilldownTitle;
+    private List<ObligationSummary> _drilldownItems = new();
+
+    protected override async Task OnInitializedAsync()
+    {
+        ProjectState.OnChange += HandleProjectChanged;
+        await LoadSummaryAsync();
+    }
+
+    private async Task LoadSummaryAsync()
+    {
+        _loading = true;
+        await ProjectState.InitializeAsync(CostService);
+        if (ProjectState.ActiveProjectId.HasValue)
+        {
+            _summary = await CostService.GetProjectFinancialSummaryAsync(ProjectState.ActiveProjectId.Value);
+        }
+        else
+        {
+            _summary = null;
+        }
+        _loading = false;
+    }
+
+    private void OpenDrilldown(string title, string filter)
+    {
+        if (_summary is null) return;
+        _drilldownTitle = title;
+        _drilldownItems = filter switch
+        {
+            "materials" => _summary.Obligations.Where(o => o.ObligationType == ObligationType.MaterialPurchase).ToList(),
+            "workers" => _summary.Obligations.Where(o => o.ObligationType == ObligationType.WorkerWork).ToList(),
+            "other" => _summary.Obligations.Where(o => o.ObligationType == ObligationType.OtherExpense).ToList(),
+            "debt" => _summary.Obligations.Where(o => o.RemainingAmount > 0).ToList(),
+            "paid" => _summary.Obligations.Where(o => o.PaidAmount > 0).ToList(),
+            _ => _summary.Obligations
+        };
+    }
+
+    private async Task CreateDemoProjectAsync()
+    {
+        var project = await CostService.CreateProjectAsync(new Project
+        {
+            Name = "بناء فيلا عائلية - نموذج تجريبي",
+            Location = "الجزائر العاصمة",
+            OwnerName = "محمد أمين",
+            StartDate = DateTime.Today.AddDays(-30),
+            EstimatedBudget = 8_500_000m,
+            Description = "مشروع تجريبي يوضح حسابات المواد والعمال والمراحل",
+            Status = ProjectStatus.InProgress,
+            CurrencyCode = "DZD"
+        });
+
+        var phases = await CostService.GetPhasesAsync(project.Id);
+        await CostService.AddMaterialPurchaseAsync(new MaterialPurchase
+        {
+            ProjectId = project.Id,
+            PhaseId = phases[1].Id,
+            SupplierName = "مؤسسة الأمل لمواد البناء",
+            InvoiceNumber = "FAC-101",
+            PurchaseDate = DateTime.Today.AddDays(-20),
+            TransportCost = 6_000m,
+            Items = new List<MaterialItem>
+            {
+                new() { Name = "إسمنت بورتلاند", Category = MaterialCategory.Cement, Quantity = 120, Unit = MeasurementUnit.Bag, UnitPrice = 950m },
+                new() { Name = "حديد تسليح 12 مم", Category = MaterialCategory.Steel, Quantity = 3, Unit = MeasurementUnit.Ton, UnitPrice = 142_000m }
+            }
+        }, initialPaidAmount: 400_000m, PaymentMethod.BankTransfer);
+
+        var worker = await CostService.AddWorkerAsync(new Worker
+        {
+            ProjectId = project.Id,
+            Name = "عمر بن يوسف",
+            Specialty = WorkerSpecialty.Mason,
+            Phone = "0550123456"
+        });
+
+        await CostService.AddWorkEntryAsync(new WorkerWorkEntry
+        {
+            ProjectId = project.Id,
+            WorkerId = worker.Id,
+            PhaseId = phases[2].Id,
+            WorkType = "صب الأعمدة والأساسات",
+            CalculationMethod = LaborCalculationMethod.Daily,
+            UnitsCompleted = 12,
+            UnitRate = 4_500m,
+            WorkDate = DateTime.Today.AddDays(-10)
+        }, initialPaidAmount: 30_000m, PaymentMethod.Cash);
+
+        await CostService.AddOtherExpenseAsync(new OtherExpense
+        {
+            ProjectId = project.Id,
+            PhaseId = phases[1].Id,
+            Category = ExpenseCategory.EquipmentRental,
+            Title = "كراء آلة الحفر (Poclain)",
+            VendorOrParty = "شركة الأشغال الكبرى",
+            Amount = 75_000m,
+            ExpenseDate = DateTime.Today.AddDays(-25)
+        }, initialPaidAmount: 75_000m, PaymentMethod.Cash);
+
+        await ProjectState.SetActiveProjectAsync(CostService, project.Id);
+        await LoadSummaryAsync();
+    }
+
+    private async void HandleProjectChanged()
+    {
+        await LoadSummaryAsync();
+        await InvokeAsync(StateHasChanged);
+    }
+
+    public void Dispose()
+    {
+        ProjectState.OnChange -= HandleProjectChanged;
+    }
+}

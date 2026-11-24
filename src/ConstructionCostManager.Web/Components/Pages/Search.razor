@@ -1,0 +1,162 @@
+@page "/search"
+@inject IConstructionCostService CostService
+@inject ActiveProjectState ProjectState
+@implements IDisposable
+
+<PageTitle>البحث والتصفية - مدير تكاليف البناء</PageTitle>
+
+@if (ProjectState.ActiveProject is null)
+{
+    <div class="fin-card text-center py-4">يرجى إنشاء أو اختيار مشروع أولاً من صفحة <a href="/projects">المشاريع</a>.</div>
+}
+else
+{
+    var cur = ProjectState.ActiveProject.CurrencyCode;
+
+    <h4 class="fw-bold mb-3">البحث والتصفية المتقدمة</h4>
+
+    <div class="fin-card mb-4">
+        <div class="row g-3">
+            <div class="col-md-4">
+                <label class="form-label small fw-semibold">بحث نصي (مادة، عامل، مورد، بيان)</label>
+                <input class="form-control" @bind="_filter.SearchText" placeholder="اكتب كلمة للبحث..." />
+            </div>
+            <div class="col-md-3">
+                <label class="form-label small fw-semibold">المرحلة</label>
+                <select class="form-select" @bind="_selectedPhaseId">
+                    <option value="0">جميع المراحل</option>
+                    @foreach (var ph in _phases)
+                    {
+                        <option value="@ph.Id">@ph.DisplayOrder. @ph.Name</option>
+                    }
+                </select>
+            </div>
+            <div class="col-md-3">
+                <label class="form-label small fw-semibold">التصنيف الرئيسي</label>
+                <select class="form-select" @bind="_selectedType">
+                    <option value="">الكل</option>
+                    @foreach (var t in Enum.GetValues<ObligationType>())
+                    {
+                        <option value="@t">@ArabicDisplayHelper.GetObligationTypeLabel(t)</option>
+                    }
+                </select>
+            </div>
+            <div class="col-md-2">
+                <label class="form-label small fw-semibold">تصنيف المادة</label>
+                <select class="form-select" @bind="_selectedMatCat">
+                    <option value="">الكل</option>
+                    @foreach (var c in Enum.GetValues<MaterialCategory>())
+                    {
+                        <option value="@c">@ArabicDisplayHelper.GetMaterialCategoryLabel(c)</option>
+                    }
+                </select>
+            </div>
+            <div class="col-md-2">
+                <label class="form-label small fw-semibold">من تاريخ</label>
+                <input type="date" class="form-control" @bind="_filter.FromDate" />
+            </div>
+            <div class="col-md-2">
+                <label class="form-label small fw-semibold">إلى تاريخ</label>
+                <input type="date" class="form-control" @bind="_filter.ToDate" />
+            </div>
+            <div class="col-md-2">
+                <label class="form-label small fw-semibold">أدنى مبلغ</label>
+                <input type="number" class="form-control" @bind="_filter.MinAmount" />
+            </div>
+            <div class="col-md-2">
+                <label class="form-label small fw-semibold">أعلى مبلغ</label>
+                <input type="number" class="form-control" @bind="_filter.MaxAmount" />
+            </div>
+            <div class="col-md-2 d-flex align-items-end">
+                <div class="form-check mb-2">
+                    <input class="form-check-input" type="checkbox" id="unpaidOnly" @bind="_filter.OnlyUnpaid" />
+                    <label class="form-check-label small" for="unpaidOnly">غير المدفوعة فقط</label>
+                </div>
+            </div>
+            <div class="col-md-2 d-flex align-items-end">
+                <button class="btn btn-primary w-100" @onclick="RunSearchAsync">بحث وتصفية</button>
+            </div>
+        </div>
+    </div>
+
+    <div class="fin-card">
+        <div class="d-flex justify-content-between align-items-center mb-3">
+            <span class="fw-bold">النتائج (@_results.Count)</span>
+            <span class="money-num fw-bold text-primary">
+                مجموع النتائج: @ArabicDisplayHelper.FormatMoney(_results.Sum(r => r.TotalAmount), cur)
+            </span>
+        </div>
+        <div class="table-responsive">
+            <table class="table table-hover align-middle mb-0">
+                <thead>
+                    <tr>
+                        <th>التاريخ</th>
+                        <th>التصنيف</th>
+                        <th>المرحلة</th>
+                        <th>البيان</th>
+                        <th>الطرف / المورد</th>
+                        <th>المستحق</th>
+                        <th>المدفوع</th>
+                        <th>المتبقي</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var r in _results)
+                    {
+                        <tr>
+                            <td>@r.Date.ToString("yyyy-MM-dd")</td>
+                            <td>@r.CategoryName</td>
+                            <td>@r.PhaseName</td>
+                            <td class="fw-semibold">@r.Title</td>
+                            <td>@r.PartyName</td>
+                            <td class="money-num">@ArabicDisplayHelper.FormatMoney(r.TotalAmount, cur)</td>
+                            <td class="money-num text-success">@ArabicDisplayHelper.FormatMoney(r.PaidAmount, cur)</td>
+                            <td class="money-num text-danger">@ArabicDisplayHelper.FormatMoney(r.RemainingAmount, cur)</td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+    </div>
+}
+
+@code {
+    private ExpenseSearchFilter _filter = new();
+    private List<ConstructionPhase> _phases = new();
+    private List<SearchResultItem> _results = new();
+    private int _selectedPhaseId;
+    private string _selectedType = string.Empty;
+    private string _selectedMatCat = string.Empty;
+
+    protected override async Task OnInitializedAsync()
+    {
+        ProjectState.OnChange += HandleProjectChanged;
+        await LoadInitialAsync();
+    }
+
+    private async Task LoadInitialAsync()
+    {
+        if (!ProjectState.ActiveProjectId.HasValue) return;
+        _phases = await CostService.GetPhasesAsync(ProjectState.ActiveProjectId.Value);
+        await RunSearchAsync();
+    }
+
+    private async Task RunSearchAsync()
+    {
+        if (!ProjectState.ActiveProjectId.HasValue) return;
+        _filter.ProjectId = ProjectState.ActiveProjectId.Value;
+        _filter.PhaseId = _selectedPhaseId > 0 ? _selectedPhaseId : null;
+        _filter.ObligationType = Enum.TryParse<ObligationType>(_selectedType, out var t) ? t : null;
+        _filter.MaterialCategory = Enum.TryParse<MaterialCategory>(_selectedMatCat, out var mc) ? mc : null;
+
+        _results = await CostService.SearchExpensesAsync(_filter);
+    }
+
+    private async void HandleProjectChanged()
+    {
+        await LoadInitialAsync();
+        await InvokeAsync(StateHasChanged);
+    }
+
+    public void Dispose() => ProjectState.OnChange -= HandleProjectChanged;
+}
