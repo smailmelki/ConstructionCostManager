@@ -259,10 +259,17 @@ else
             _statusMessage = "يرجى ملء الحقول المطلوبة.";
             return;
         }
-        await CostService.AddWorkEntryAsync(_newEntry, _initialPaid, _paymentMethod);
-        _showWorkForm = false;
-        _statusMessage = "تم تسجيل أجرة العامل بنجاح.";
-        await LoadAsync();
+        try
+        {
+            await CostService.AddWorkEntryAsync(_newEntry, _initialPaid, _paymentMethod);
+            _showWorkForm = false;
+            _statusMessage = "تم تسجيل أجرة العامل بنجاح.";
+            await LoadAsync();
+        }
+        catch (Exception ex)
+        {
+            _statusMessage = ex.Message;
+        }
     }
 
     private async Task DeleteEntryAsync(int id)

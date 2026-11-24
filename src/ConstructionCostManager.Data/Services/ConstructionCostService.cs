@@ -30,13 +30,17 @@ public class ConstructionCostService : IConstructionCostService
         if (string.IsNullOrWhiteSpace(project.Name))
             throw new ArgumentException("اسم المشروع مطلوب.", nameof(project));
 
+        if (project.EstimatedBudget < 0)
+            throw new ArgumentOutOfRangeException(nameof(project), "الميزانية التقديرية لا يمكن أن تكون سالبة.");
+
         if (string.IsNullOrWhiteSpace(project.CurrencyCode))
             project.CurrencyCode = await GetSettingAsync("DefaultCurrency", "DZD");
+
+        await using var transaction = await _db.Database.BeginTransactionAsync();
 
         _db.Projects.Add(project);
         await _db.SaveChangesAsync();
 
-        // Seed default 13 construction phases for this project
         var phases = ArabicDisplayHelper.DefaultConstructionPhases
             .Select(p => new ConstructionPhase
             {
@@ -50,6 +54,7 @@ public class ConstructionCostService : IConstructionCostService
         _db.ConstructionPhases.AddRange(phases);
         await _db.SaveChangesAsync();
 
+        await transaction.CommitAsync();
         return project;
     }
 
@@ -153,11 +158,20 @@ public class ConstructionCostService : IConstructionCostService
         if (purchase.Items.Count == 0)
             throw new ArgumentException("يجب إضافة مادة واحدة على الأقل في عملية الشراء.");
 
+        if (purchase.TransportCost < 0)
+            throw new ArgumentOutOfRangeException(nameof(purchase), "تكلفة النقل لا يمكن أن تكون سالبة.");
+
         foreach (var item in purchase.Items)
         {
-            if (item.Quantity <= 0 || item.UnitPrice < 0)
-                throw new ArgumentException($"الكمية أو السعر غير صالح للمادة: {item.Name}");
+            if (string.IsNullOrWhiteSpace(item.Name) || item.Quantity <= 0 || item.UnitPrice < 0)
+                throw new ArgumentException($"بيانات المادة غير صالحة: {item.Name}");
         }
+
+        var totalAmount = purchase.TotalAmount;
+        ValidateInitialPaymentAmount(initialPaidAmount, totalAmount);
+        await EnsureProjectAndPhaseAsync(purchase.ProjectId, purchase.PhaseId);
+
+        await using var transaction = await _db.Database.BeginTransactionAsync();
 
         _db.MaterialPurchases.Add(purchase);
         await _db.SaveChangesAsync();
@@ -176,6 +190,7 @@ public class ConstructionCostService : IConstructionCostService
             });
         }
 
+        await transaction.CommitAsync();
         return purchase;
     }
 
@@ -185,6 +200,11 @@ public class ConstructionCostService : IConstructionCostService
             .Include(p => p.Items)
             .FirstOrDefaultAsync(p => p.Id == purchase.Id)
             ?? throw new InvalidOperationException("عملية الشراء غير موجودة.");
+
+        await EnsureProjectAndPhaseAsync(existing.ProjectId, purchase.PhaseId);
+
+        if (purchase.TransportCost < 0)
+            throw new ArgumentOutOfRangeException(nameof(purchase), "تكلفة النقل لا يمكن أن تكون سالبة.");
 
         existing.PhaseId = purchase.PhaseId;
         existing.SupplierName = purchase.SupplierName.Trim();
@@ -233,7 +253,10 @@ public class ConstructionCostService : IConstructionCostService
     public async Task<Worker> AddWorkerAsync(Worker worker)
     {
         if (string.IsNullOrWhiteSpace(worker.Name))
-            throw new ArgumentException("اسم العامل مطلوب.");
+            throw new ArgumentException("اسم العامل مطلوب.", nameof(worker));
+
+        if (!await _db.Projects.AnyAsync(p => p.Id == worker.ProjectId))
+            throw new InvalidOperationException("المشروع المحدد غير موجود أو غير نشط.");
 
         _db.Workers.Add(worker);
         await _db.SaveChangesAsync();
@@ -276,6 +299,12 @@ public class ConstructionCostService : IConstructionCostService
         if (entry.UnitsCompleted <= 0 || entry.UnitRate < 0)
             throw new ArgumentException("عدد الوحدات أو السعر غير صالح.");
 
+        ValidateInitialPaymentAmount(initialPaidAmount, entry.TotalAmount);
+        await EnsureProjectAndPhaseAsync(entry.ProjectId, entry.PhaseId);
+        await EnsureProjectAndWorkerAsync(entry.ProjectId, entry.WorkerId);
+
+        await using var transaction = await _db.Database.BeginTransactionAsync();
+
         _db.WorkerWorkEntries.Add(entry);
         await _db.SaveChangesAsync();
 
@@ -293,6 +322,7 @@ public class ConstructionCostService : IConstructionCostService
             });
         }
 
+        await transaction.CommitAsync();
         return entry;
     }
 
@@ -333,6 +363,11 @@ public class ConstructionCostService : IConstructionCostService
         if (expense.Amount <= 0)
             throw new ArgumentException("المبلغ يجب أن يكون أكبر من الصفر.");
 
+        ValidateInitialPaymentAmount(initialPaidAmount, expense.Amount);
+        await EnsureProjectAndPhaseAsync(expense.ProjectId, expense.PhaseId);
+
+        await using var transaction = await _db.Database.BeginTransactionAsync();
+
         _db.OtherExpenses.Add(expense);
         await _db.SaveChangesAsync();
 
@@ -350,6 +385,7 @@ public class ConstructionCostService : IConstructionCostService
             });
         }
 
+        await transaction.CommitAsync();
         return expense;
     }
 
@@ -391,6 +427,22 @@ public class ConstructionCostService : IConstructionCostService
     {
         if (payment.Amount <= 0)
             throw new ArgumentException("مبلغ الدفعة يجب أن يكون أكبر من الصفر.");
+
+        var obligationAmount = await GetObligationAmountAsync(
+            payment.ProjectId, payment.ObligationType, payment.ReferenceId);
+
+        var alreadyPaid = await _db.Payments
+            .Where(p => p.ProjectId == payment.ProjectId
+                && p.ObligationType == payment.ObligationType
+                && p.ReferenceId == payment.ReferenceId)
+            .SumAsync(p => (decimal?)p.Amount) ?? 0m;
+
+        var remaining = Math.Round(
+            obligationAmount - alreadyPaid, 2, MidpointRounding.AwayFromZero);
+
+        if (payment.Amount > remaining)
+            throw new InvalidOperationException(
+                $"مبلغ الدفعة يتجاوز المتبقي. المبلغ المتبقي هو {remaining:N2}.");
 
         _db.Payments.Add(payment);
         await _db.SaveChangesAsync();
@@ -562,6 +614,62 @@ public class ConstructionCostService : IConstructionCostService
             query = query.Where(r => r.RemainingAmount > 0m);
 
         return query.OrderByDescending(r => r.Date).ToList();
+    }
+
+    private static void ValidateInitialPaymentAmount(decimal amount, decimal obligationAmount)
+    {
+        if (amount < 0)
+            throw new ArgumentOutOfRangeException(nameof(amount), "مبلغ الدفعة لا يمكن أن يكون سالباً.");
+
+        if (amount > Math.Round(obligationAmount, 2, MidpointRounding.AwayFromZero))
+            throw new InvalidOperationException("الدفعة الأولى لا يمكن أن تتجاوز إجمالي الالتزام.");
+    }
+
+    private async Task EnsureProjectAndPhaseAsync(int projectId, int phaseId)
+    {
+        if (!await _db.Projects.AnyAsync(p => p.Id == projectId))
+            throw new InvalidOperationException("المشروع المحدد غير موجود أو غير نشط.");
+
+        if (!await _db.ConstructionPhases.AnyAsync(p => p.Id == phaseId && p.ProjectId == projectId))
+            throw new InvalidOperationException("مرحلة البناء لا تتبع المشروع المحدد.");
+    }
+
+    private async Task EnsureProjectAndWorkerAsync(int projectId, int workerId)
+    {
+        if (!await _db.Workers.AnyAsync(w => w.Id == workerId && w.ProjectId == projectId))
+            throw new InvalidOperationException("العامل المحدد لا يتبع المشروع المحدد.");
+    }
+
+    private async Task<decimal> GetObligationAmountAsync(
+        int projectId, ObligationType obligationType, int referenceId)
+    {
+        switch (obligationType)
+        {
+            case ObligationType.MaterialPurchase:
+            {
+                var purchase = await _db.MaterialPurchases
+                    .Include(p => p.Items)
+                    .FirstOrDefaultAsync(p => p.Id == referenceId && p.ProjectId == projectId);
+                return purchase?.TotalAmount
+                    ?? throw new InvalidOperationException("فاتورة المواد غير موجودة ضمن المشروع المحدد.");
+            }
+            case ObligationType.WorkerWork:
+            {
+                var work = await _db.WorkerWorkEntries
+                    .FirstOrDefaultAsync(w => w.Id == referenceId && w.ProjectId == projectId);
+                return work?.TotalAmount
+                    ?? throw new InvalidOperationException("سجل أجرة العامل غير موجود ضمن المشروع المحدد.");
+            }
+            case ObligationType.OtherExpense:
+            {
+                var expense = await _db.OtherExpenses
+                    .FirstOrDefaultAsync(e => e.Id == referenceId && e.ProjectId == projectId);
+                return expense?.Amount
+                    ?? throw new InvalidOperationException("المصروف غير موجود ضمن المشروع المحدد.");
+            }
+            default:
+                throw new ArgumentOutOfRangeException(nameof(obligationType), "نوع الالتزام غير معروف.");
+        }
     }
 
     public async Task<string> GetSettingAsync(string key, string defaultValue = "")

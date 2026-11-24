@@ -65,6 +65,114 @@ public class ConstructionCostServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task AddMaterialPurchase_RejectsInitialPaymentAboveTotal_AndDoesNotSaveAnything()
+    {
+        var project = await _service.CreateProjectAsync(new Project { Name = "مشروع المواد" });
+        var phase = (await _service.GetPhasesAsync(project.Id)).First();
+
+        var purchase = new MaterialPurchase
+        {
+            ProjectId = project.Id,
+            PhaseId = phase.Id,
+            Items = new List<MaterialItem>
+            {
+                new() { Name = "إسمنت", Quantity = 1m, UnitPrice = 100m }
+            }
+        };
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            _service.AddMaterialPurchaseAsync(purchase, initialPaidAmount: 101m));
+
+        Assert.Empty(await _service.GetMaterialPurchasesAsync(project.Id));
+        Assert.Empty(await _service.GetPaymentsAsync(project.Id));
+    }
+
+    [Fact]
+    public async Task RecordPayment_RejectsOverpaymentAndCrossProjectReference()
+    {
+        var project = await _service.CreateProjectAsync(new Project { Name = "المشروع الأول" });
+        var otherProject = await _service.CreateProjectAsync(new Project { Name = "المشروع الثاني" });
+        var phase = (await _service.GetPhasesAsync(project.Id)).First();
+
+        var purchase = await _service.AddMaterialPurchaseAsync(new MaterialPurchase
+        {
+            ProjectId = project.Id,
+            PhaseId = phase.Id,
+            Items = new List<MaterialItem>
+            {
+                new() { Name = "رمل", Quantity = 1m, UnitPrice = 100m }
+            }
+        });
+
+        await _service.RecordPaymentAsync(new Payment
+        {
+            ProjectId = project.Id,
+            ObligationType = ObligationType.MaterialPurchase,
+            ReferenceId = purchase.Id,
+            Amount = 70m
+        });
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            _service.RecordPaymentAsync(new Payment
+            {
+                ProjectId = project.Id,
+                ObligationType = ObligationType.MaterialPurchase,
+                ReferenceId = purchase.Id,
+                Amount = 31m
+            }));
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            _service.RecordPaymentAsync(new Payment
+            {
+                ProjectId = otherProject.Id,
+                ObligationType = ObligationType.MaterialPurchase,
+                ReferenceId = purchase.Id,
+                Amount = 1m
+            }));
+
+        var payments = await _service.GetPaymentsAsync(project.Id);
+        Assert.Single(payments);
+        Assert.Equal(70m, payments[0].Amount);
+    }
+
+    [Fact]
+    public async Task AddExpenses_RejectsPhaseOrWorkerFromAnotherProject()
+    {
+        var project = await _service.CreateProjectAsync(new Project { Name = "مشروع أ" });
+        var otherProject = await _service.CreateProjectAsync(new Project { Name = "مشروع ب" });
+        var projectPhase = (await _service.GetPhasesAsync(project.Id)).First();
+        var otherPhase = (await _service.GetPhasesAsync(otherProject.Id)).First();
+        var otherWorker = await _service.AddWorkerAsync(new Worker
+        {
+            ProjectId = otherProject.Id,
+            Name = "عامل المشروع ب"
+        });
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            _service.AddOtherExpenseAsync(new OtherExpense
+            {
+                ProjectId = project.Id,
+                PhaseId = otherPhase.Id,
+                Title = "مصروف غير صحيح",
+                Amount = 50m
+            }));
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            _service.AddWorkEntryAsync(new WorkerWorkEntry
+            {
+                ProjectId = project.Id,
+                WorkerId = otherWorker.Id,
+                PhaseId = projectPhase.Id,
+                WorkType = "بناء",
+                UnitsCompleted = 1m,
+                UnitRate = 100m
+            }));
+
+        Assert.Empty(await _service.GetOtherExpensesAsync(project.Id));
+        Assert.Empty(await _service.GetWorkEntriesAsync(project.Id));
+    }
+
+    [Fact]
     public async Task SearchAndReporting_WorkEndToEndWithSqlite()
     {
         var project = await _service.CreateProjectAsync(new Project

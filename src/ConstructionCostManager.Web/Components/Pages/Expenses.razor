@@ -18,6 +18,11 @@ else
         <button class="btn btn-primary" @onclick="OpenForm">+ إضافة مصروف جديد</button>
     </div>
 
+    @if (!string.IsNullOrWhiteSpace(_statusMessage))
+    {
+        <div class="alert alert-info py-2">@_statusMessage</div>
+    }
+
     @if (_showForm)
     {
         <div class="fin-card mb-4">
@@ -121,6 +126,7 @@ else
     private OtherExpense _newExpense = new();
     private decimal _initialPaid;
     private bool _showForm;
+    private string? _statusMessage;
 
     protected override async Task OnInitializedAsync()
     {
@@ -151,9 +157,17 @@ else
     private async Task SaveAsync()
     {
         if (string.IsNullOrWhiteSpace(_newExpense.Title) || _newExpense.Amount <= 0) return;
-        await CostService.AddOtherExpenseAsync(_newExpense, _initialPaid);
-        _showForm = false;
-        await LoadAsync();
+        try
+        {
+            await CostService.AddOtherExpenseAsync(_newExpense, _initialPaid);
+            _showForm = false;
+            _statusMessage = "تم حفظ المصروف بنجاح.";
+            await LoadAsync();
+        }
+        catch (Exception ex)
+        {
+            _statusMessage = ex.Message;
+        }
     }
 
     private async Task DeleteAsync(int id)

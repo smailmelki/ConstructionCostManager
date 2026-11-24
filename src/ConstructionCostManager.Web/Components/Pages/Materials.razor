@@ -261,10 +261,17 @@ else
         }
 
         _newPurchase.Items = validItems;
-        await CostService.AddMaterialPurchaseAsync(_newPurchase, _initialPaid, _paymentMethod);
-        _showForm = false;
-        _statusMessage = "تم حفظ فاتورة المواد وتحديث التكاليف بنجاح.";
-        await LoadAsync();
+        try
+        {
+            await CostService.AddMaterialPurchaseAsync(_newPurchase, _initialPaid, _paymentMethod);
+            _showForm = false;
+            _statusMessage = "تم حفظ فاتورة المواد وتحديث التكاليف بنجاح.";
+            await LoadAsync();
+        }
+        catch (Exception ex)
+        {
+            _statusMessage = ex.Message;
+        }
     }
 
     private async Task DeletePurchaseAsync(int id)
