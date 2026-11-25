@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<ContentPage xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
+             x:Class="ConstructionCostManager.Android.MainPage"
+             Title="مدير تكاليف البناء"
+             FlowDirection="RightToLeft">
+    <Grid RowDefinitions="Auto,Auto,*" Padding="12" RowSpacing="10">
+        <VerticalStackLayout Grid.Row="0" Spacing="3">
+            <Label Text="مدير تكاليف البناء"
+                   FontSize="22"
+                   FontAttributes="Bold"
+                   HorizontalTextAlignment="Center" />
+            <Label Text="نسخة Android التجريبية"
+                   FontSize="13"
+                   TextColor="Gray"
+                   HorizontalTextAlignment="Center" />
+        </VerticalStackLayout>
+
+        <VerticalStackLayout Grid.Row="1" Spacing="6">
+            <Entry x:Name="ServerAddressEntry"
+                   Placeholder="عنوان الخادم، مثال: http://192.168.1.10:5000"
+                   Keyboard="Url"
+                   ClearButtonVisibility="WhileEditing"
+                   FlowDirection="LeftToRight" />
+            <Button Text="اتصال / فتح التطبيق"
+                    Clicked="OnConnectClicked" />
+            <Label x:Name="StatusLabel"
+                   Text="أدخل عنوان الخادم للبدء."
+                   FontSize="12"
+                   TextColor="Gray"
+                   HorizontalTextAlignment="Center" />
+        </VerticalStackLayout>
+
+        <WebView x:Name="AppWebView"
+                 Grid.Row="2"
+                 IsVisible="False"
+                 Navigated="OnWebViewNavigated" />
+    </Grid>
+</ContentPage>
