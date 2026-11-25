@@ -43,6 +43,9 @@
                 <button class="btn btn-sm btn-outline-secondary" @onclick="ProjectState.ToggleTheme">
                     @(ProjectState.IsDarkMode ? "☀️ الوضع الفاتح" : "🌙 الوضع الداكن")
                 </button>
+                <form method="post" action="/account/logout" class="d-inline">
+                    <button class="btn btn-sm btn-outline-danger" type="submit">خروج</button>
+                </form>
             </div>
         </header>
 

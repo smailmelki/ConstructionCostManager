@@ -4,6 +4,7 @@ using ConstructionCostManager.Data.Services;
 using ConstructionCostManager.Reporting;
 using ConstructionCostManager.Web.Components;
 using ConstructionCostManager.Web.Services;
+using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.EntityFrameworkCore;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -18,6 +19,30 @@ builder.Services.AddDbContext<AppDbContext>(options =>
 builder.Services.AddScoped<IConstructionCostService, ConstructionCostService>();
 builder.Services.AddSingleton(new DatabaseBackupService(dbPath));
 builder.Services.AddScoped<ActiveProjectState>();
+builder.Services.AddSingleton<IAdminAuthenticationService, AdminAuthenticationService>();
+
+builder.Services.AddAuthentication(CookieAuthenticationDefaults.AuthenticationScheme)
+    .AddCookie(options =>
+    {
+        options.Cookie.Name = "construction_cost_manager_auth";
+        options.Cookie.HttpOnly = true;
+        options.Cookie.SecurePolicy = CookieSecurePolicy.Always;
+        // Required when the app is hosted inside a cross-site HTTPS preview iframe.
+        options.Cookie.SameSite = SameSiteMode.None;
+        options.LoginPath = "/account/login";
+        options.AccessDeniedPath = "/account/denied";
+        options.ExpireTimeSpan = TimeSpan.FromHours(12);
+        options.SlidingExpiration = true;
+    });
+
+builder.Services.AddAuthorization(options =>
+{
+    // Every page and endpoint is private unless it explicitly opts into anonymous access.
+    options.FallbackPolicy = new Microsoft.AspNetCore.Authorization.AuthorizationPolicyBuilder()
+        .RequireAuthenticatedUser()
+        .Build();
+    options.AddPolicy("AdministratorOnly", policy => policy.RequireRole("Administrator"));
+});
 
 builder.Services.AddRazorComponents()
     .AddInteractiveServerComponents();
@@ -37,8 +62,11 @@ if (!app.Environment.IsDevelopment())
 }
 
 app.UseHttpsRedirection();
+app.UseAuthentication();
+app.UseAuthorization();
 app.UseAntiforgery();
 app.MapStaticAssets();
+app.MapAccountEndpoints();
 
 // Report & Backup API Endpoints
 app.MapGet("/api/reports/excel", async (
@@ -53,7 +81,7 @@ app.MapGet("/api/reports/excel", async (
     var bytes = ExcelReportGenerator.Generate(request);
     var fileName = $"report_{projectId}_{type}_{DateTime.Now:yyyyMMdd}.xlsx";
     return Results.File(bytes, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", fileName);
-});
+}).RequireAuthorization();
 
 app.MapGet("/api/reports/pdf", async (
     int projectId,
@@ -67,16 +95,17 @@ app.MapGet("/api/reports/pdf", async (
     var bytes = PdfReportGenerator.Generate(request);
     var fileName = $"report_{projectId}_{type}_{DateTime.Now:yyyyMMdd}.pdf";
     return Results.File(bytes, "application/pdf", fileName);
-});
+}).RequireAuthorization();
 
 app.MapGet("/api/backup/download", async (DatabaseBackupService backupService) =>
 {
     var bytes = await backupService.ExportBackupBytesAsync();
     return Results.File(bytes, "application/octet-stream", $"construction_costs_backup_{DateTime.Now:yyyyMMdd_HHmm}.db");
-});
+}).RequireAuthorization("AdministratorOnly");
 
 app.MapRazorComponents<App>()
-    .AddInteractiveServerRenderMode();
+    .AddInteractiveServerRenderMode()
+    .RequireAuthorization();
 
 app.Run();
 
