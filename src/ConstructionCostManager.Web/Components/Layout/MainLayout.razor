@@ -3,24 +3,30 @@
 @inject ActiveProjectState ProjectState
 @implements IDisposable
 
-<div class="app-shell @(ProjectState.IsDarkMode ? "theme-dark" : "")">
-    <aside class="app-sidebar no-print">
-        <div class="px-2 pb-3 mb-2 border-bottom border-secondary border-opacity-25">
-            <div class="fw-bold fs-5 text-white">🏗️ مدير تكاليف البناء</div>
-            <div class="small text-white-50">نظام المتابعة المالية للمشاريع</div>
+<div class="app-shell @(ProjectState.IsDarkMode ? "theme-dark" : "") @(_isSidebarOpen ? "sidebar-open" : "")">
+    <aside class="app-sidebar no-print" aria-label="التنقل الرئيسي">
+        <div class="sidebar-brand d-flex align-items-start justify-content-between gap-2 border-bottom border-secondary border-opacity-25">
+            <div>
+                <div class="sidebar-brand-title fw-bold fs-5 text-white">🏗️ مدير تكاليف البناء</div>
+                <div class="small text-white-50">نظام المتابعة المالية للمشاريع</div>
+            </div>
+            <button type="button" class="sidebar-close" @onclick="CloseSidebar" aria-label="إغلاق القائمة">×</button>
         </div>
-        <NavMenu />
+        <NavMenu OnNavigate="CloseSidebar" />
     </aside>
+    <div class="sidebar-backdrop" @onclick="CloseSidebar" aria-hidden="true"></div>
 
     <div class="app-main">
         <header class="app-topbar no-print">
             <div class="d-flex align-items-center gap-2 flex-wrap">
+                <button type="button" class="mobile-menu-toggle" @onclick="ToggleSidebar" aria-label="فتح القائمة" aria-expanded="@_isSidebarOpen">☰</button>
                 <span class="fw-semibold small text-secondary">المشروع النشط:</span>
                 @if (_projects.Count > 0)
                 {
-                    <select class="form-select form-select-sm" style="min-width: 220px; width: auto;"
+                    <select class="form-select form-select-sm topbar-project-selector"
                             value="@(ProjectState.ActiveProjectId ?? 0)"
-                            @onchange="OnProjectChanged">
+                            @onchange="OnProjectChanged"
+                            aria-label="اختيار المشروع النشط">
                         @foreach (var p in _projects)
                         {
                             <option value="@p.Id">@p.Name (@ArabicDisplayHelper.GetStatusLabel(p.Status))</option>
@@ -33,14 +39,14 @@
                 }
             </div>
 
-            <div class="d-flex align-items-center gap-2">
+            <div class="d-flex align-items-center justify-content-end gap-2 flex-wrap">
                 @if (ProjectState.ActiveProject is not null)
                 {
                     <span class="badge bg-primary bg-opacity-10 text-primary border border-primary border-opacity-25 px-2 py-1">
                         العملة: @ProjectState.ActiveProject.CurrencyCode
                     </span>
                 }
-                <button class="btn btn-sm btn-outline-secondary" @onclick="ProjectState.ToggleTheme">
+                <button class="btn btn-sm btn-outline-secondary" @onclick="ProjectState.ToggleTheme" aria-label="تبديل الوضع اللوني">
                     @(ProjectState.IsDarkMode ? "☀️ الوضع الفاتح" : "🌙 الوضع الداكن")
                 </button>
                 <form method="post" action="/account/logout" class="d-inline">
@@ -57,6 +63,7 @@
 
 @code {
     private List<Project> _projects = new();
+    private bool _isSidebarOpen;
 
     protected override async Task OnInitializedAsync()
     {
@@ -77,6 +84,9 @@
             await ProjectState.SetActiveProjectAsync(CostService, projectId);
         }
     }
+
+    private void ToggleSidebar() => _isSidebarOpen = !_isSidebarOpen;
+    private void CloseSidebar() => _isSidebarOpen = false;
 
     private async void HandleStateChanged()
     {

@@ -1,32 +1,44 @@
-<nav class="sidebar-nav-list">
-    <NavLink class="nav-item-link" href="" Match="NavLinkMatch.All">
-        <span>📊</span><span>لوحة التحكم</span>
+@using Microsoft.AspNetCore.Components
+
+<nav class="sidebar-nav-list" aria-label="أقسام التطبيق">
+    <NavLink class="nav-item-link" href="" Match="NavLinkMatch.All" @onclick="HandleNavigate">
+        <span aria-hidden="true">📊</span><span>لوحة التحكم</span>
     </NavLink>
-    <NavLink class="nav-item-link" href="projects">
-        <span>🏢</span><span>المشاريع</span>
+    <NavLink class="nav-item-link" href="projects" @onclick="HandleNavigate">
+        <span aria-hidden="true">🏢</span><span>المشاريع</span>
     </NavLink>
-    <NavLink class="nav-item-link" href="materials">
-        <span>🧱</span><span>مواد البناء</span>
+    <NavLink class="nav-item-link" href="materials" @onclick="HandleNavigate">
+        <span aria-hidden="true">🧱</span><span>مواد البناء</span>
     </NavLink>
-    <NavLink class="nav-item-link" href="workers">
-        <span>👷</span><span>العمال والأجور</span>
+    <NavLink class="nav-item-link" href="workers" @onclick="HandleNavigate">
+        <span aria-hidden="true">👷</span><span>العمال والأجور</span>
     </NavLink>
-    <NavLink class="nav-item-link" href="expenses">
-        <span>🚜</span><span>النقل والمعدات</span>
+    <NavLink class="nav-item-link" href="expenses" @onclick="HandleNavigate">
+        <span aria-hidden="true">🚜</span><span>النقل والمعدات</span>
     </NavLink>
-    <NavLink class="nav-item-link" href="phases">
-        <span>🪜</span><span>مراحل البناء</span>
+    <NavLink class="nav-item-link" href="phases" @onclick="HandleNavigate">
+        <span aria-hidden="true">🪜</span><span>مراحل البناء</span>
     </NavLink>
-    <NavLink class="nav-item-link" href="payments">
-        <span>💳</span><span>المدفوعات والديون</span>
+    <NavLink class="nav-item-link" href="payments" @onclick="HandleNavigate">
+        <span aria-hidden="true">💳</span><span>المدفوعات والديون</span>
     </NavLink>
-    <NavLink class="nav-item-link" href="search">
-        <span>🔍</span><span>البحث والتصفية</span>
+    <NavLink class="nav-item-link" href="search" @onclick="HandleNavigate">
+        <span aria-hidden="true">🔍</span><span>البحث والتصفية</span>
     </NavLink>
-    <NavLink class="nav-item-link" href="reports">
-        <span>📄</span><span>التقارير والطباعة</span>
+    <NavLink class="nav-item-link" href="reports" @onclick="HandleNavigate">
+        <span aria-hidden="true">📄</span><span>التقارير والطباعة</span>
     </NavLink>
-    <NavLink class="nav-item-link" href="settings">
-        <span>⚙️</span><span>الإعدادات والنسخ</span>
+    <NavLink class="nav-item-link" href="settings" @onclick="HandleNavigate">
+        <span aria-hidden="true">⚙️</span><span>الإعدادات والنسخ</span>
     </NavLink>
 </nav>
+
+@code {
+    [Parameter]
+    public EventCallback OnNavigate { get; set; }
+
+    private async Task HandleNavigate()
+    {
+        await OnNavigate.InvokeAsync();
+    }
+}
